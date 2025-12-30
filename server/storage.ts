@@ -34,7 +34,7 @@ export interface IStorage {
   getDashboardStats(): Promise<DashboardStats>;
   getWeeklyReport(weekStart: Date): Promise<WeeklyReport>;
   getMonthlyReport(monthStart: Date): Promise<MonthlyReport>;
-  getCameraStatus(): Promise<Array<{ busId: string; busNumber: string; cameras: Array<{ channel: string; status: string }> }>>;
+  getCameraStatus(): Promise<Array<{ busId: string; busNumber: string; plate: string | null; cameras: Array<{ channel: string; status: string }> }>>;
 }
 
 export class MemStorage implements IStorage {
@@ -393,7 +393,7 @@ export class MemStorage implements IStorage {
     };
   }
 
-  async getCameraStatus(): Promise<Array<{ busId: string; busNumber: string; cameras: Array<{ channel: string; status: string }> }>> {
+  async getCameraStatus(): Promise<Array<{ busId: string; busNumber: string; plate: string | null; cameras: Array<{ channel: string; status: string }> }>> {
     const buses = Array.from(this.buses.values());
     const statuses = Array.from(this.equipmentStatuses.values()).filter(
       (s) => s.equipmentType === "camera"
@@ -412,6 +412,7 @@ export class MemStorage implements IStorage {
       return {
         busId: bus.id,
         busNumber: bus.busNumber,
+        plate: bus.plate,
         cameras,
       };
     }).sort((a, b) => a.busNumber.localeCompare(b.busNumber));

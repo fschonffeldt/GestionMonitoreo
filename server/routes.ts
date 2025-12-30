@@ -32,6 +32,50 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/buses/bulk", async (req, res) => {
+    try {
+      const bulkSchema = z.object({
+        buses: z.array(z.object({
+          busNumber: z.string().min(1, "N° distintivo requerido"),
+          plate: z.string().optional(),
+        })),
+      });
+
+      const parsed = bulkSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors });
+      }
+
+      const existingBuses = await storage.getBuses();
+      const existingNumbers = new Set(existingBuses.map(b => b.busNumber));
+      
+      const created: Array<{ busNumber: string; plate: string | null }> = [];
+      const errors: Array<{ busNumber: string; error: string }> = [];
+
+      for (const busData of parsed.data.buses) {
+        if (existingNumbers.has(busData.busNumber)) {
+          errors.push({ busNumber: busData.busNumber, error: "Ya existe" });
+          continue;
+        }
+
+        try {
+          const bus = await storage.createBus({
+            busNumber: busData.busNumber,
+            plate: busData.plate || null,
+          });
+          created.push({ busNumber: bus.busNumber, plate: bus.plate });
+          existingNumbers.add(bus.busNumber);
+        } catch {
+          errors.push({ busNumber: busData.busNumber, error: "Error al crear" });
+        }
+      }
+
+      res.status(201).json({ created: created.length, errors });
+    } catch (error) {
+      res.status(500).json({ error: "Error al crear buses en masa" });
+    }
+  });
+
   app.get("/api/incidents", async (req, res) => {
     try {
       const { status, equipmentType, busId, limit } = req.query;
