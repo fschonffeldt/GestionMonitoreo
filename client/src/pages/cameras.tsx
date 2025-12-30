@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Camera, CheckCircle, AlertTriangle, XCircle, Search, Upload, FileSpreadsheet } from "lucide-react";
+import { Camera, CheckCircle, AlertTriangle, XCircle, Search, Upload, FileSpreadsheet, Pencil } from "lucide-react";
 import { CameraChannelLabels } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -68,6 +68,8 @@ export default function Cameras() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [uploadData, setUploadData] = useState<Array<{ busNumber: string; plate: string }>>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [editingBus, setEditingBus] = useState<{ id: string; busNumber: string; plate: string } | null>(null);
+  const [editPlate, setEditPlate] = useState("");
   const { toast } = useToast();
 
   const { data: cameraStatuses, isLoading } = useQuery<CameraStatusData[]>({
@@ -98,6 +100,40 @@ export default function Cameras() {
       });
     },
   });
+
+  const updatePlateMutation = useMutation({
+    mutationFn: async ({ busId, plate }: { busId: string; plate: string }) => {
+      const response = await apiRequest("PATCH", `/api/buses/${busId}`, { plate });
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Placa actualizada",
+        description: "La placa se actualizó correctamente.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/camera-status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/buses"] });
+      setEditingBus(null);
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo actualizar la placa.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleEditPlate = (bus: CameraStatusData) => {
+    setEditingBus({ id: bus.busId, busNumber: bus.busNumber, plate: bus.plate || "" });
+    setEditPlate(bus.plate || "");
+  };
+
+  const handleSavePlate = () => {
+    if (editingBus) {
+      updatePlateMutation.mutate({ busId: editingBus.id, plate: editPlate });
+    }
+  };
 
   const stats = useMemo(() => {
     if (!cameraStatuses) return { total: 0, operational: 0, misaligned: 0, faulty: 0 };
@@ -398,6 +434,7 @@ export default function Cameras() {
                     <TableHead className="text-center">CH3</TableHead>
                     <TableHead className="text-center">CH4</TableHead>
                     <TableHead className="text-center">Estado</TableHead>
+                    <TableHead className="w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -424,6 +461,16 @@ export default function Cameras() {
                               {issueCount} problema{issueCount > 1 ? "s" : ""}
                             </Badge>
                           )}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleEditPlate(bus)}
+                            data-testid={`button-edit-plate-${bus.busNumber}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     );
@@ -477,6 +524,41 @@ export default function Cameras() {
           <span>Dañada</span>
         </div>
       </div>
+
+      <Dialog open={!!editingBus} onOpenChange={(open) => !open && setEditingBus(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Placa - Bus {editingBus?.busNumber}</DialogTitle>
+            <DialogDescription>
+              Modifique la placa patente de este bus.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              value={editPlate}
+              onChange={(e) => setEditPlate(e.target.value)}
+              placeholder="Ingrese placa patente"
+              data-testid="input-edit-plate"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditingBus(null)}
+              data-testid="button-cancel-edit"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSavePlate}
+              disabled={updatePlateMutation.isPending}
+              data-testid="button-save-plate"
+            >
+              {updatePlateMutation.isPending ? "Guardando..." : "Guardar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

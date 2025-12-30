@@ -22,6 +22,7 @@ export interface IStorage {
   getBuses(): Promise<Bus[]>;
   getBus(id: string): Promise<Bus | undefined>;
   createBus(bus: InsertBus): Promise<Bus>;
+  updateBus(id: string, updates: Partial<Bus>): Promise<Bus | undefined>;
   
   getIncidents(filters?: { status?: string; equipmentType?: string; busId?: string; limit?: number }): Promise<Incident[]>;
   getIncident(id: string): Promise<Incident | undefined>;
@@ -134,7 +135,12 @@ export class MemStorage implements IStorage {
   }
 
   async getBuses(): Promise<Bus[]> {
-    return Array.from(this.buses.values()).sort((a, b) => a.busNumber.localeCompare(b.busNumber));
+    return Array.from(this.buses.values()).sort((a, b) => {
+      const numA = parseInt(a.busNumber, 10);
+      const numB = parseInt(b.busNumber, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.busNumber.localeCompare(b.busNumber);
+    });
   }
 
   async getBus(id: string): Promise<Bus | undefined> {
@@ -160,6 +166,14 @@ export class MemStorage implements IStorage {
     });
     
     return bus;
+  }
+
+  async updateBus(id: string, updates: Partial<Bus>): Promise<Bus | undefined> {
+    const bus = this.buses.get(id);
+    if (!bus) return undefined;
+    const updatedBus = { ...bus, ...updates, id };
+    this.buses.set(id, updatedBus);
+    return updatedBus;
   }
 
   async getIncidents(filters?: { status?: string; equipmentType?: string; busId?: string; limit?: number }): Promise<Incident[]> {
@@ -415,7 +429,12 @@ export class MemStorage implements IStorage {
         plate: bus.plate,
         cameras,
       };
-    }).sort((a, b) => a.busNumber.localeCompare(b.busNumber));
+    }).sort((a, b) => {
+      const numA = parseInt(a.busNumber, 10);
+      const numB = parseInt(b.busNumber, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.busNumber.localeCompare(b.busNumber);
+    });
   }
 }
 

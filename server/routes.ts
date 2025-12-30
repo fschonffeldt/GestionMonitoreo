@@ -32,6 +32,29 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/buses/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updateSchema = z.object({
+        plate: z.string(),
+      });
+      
+      const parsed = updateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors });
+      }
+      
+      const bus = await storage.updateBus(id, parsed.data);
+      if (!bus) {
+        return res.status(404).json({ error: "Bus no encontrado" });
+      }
+      
+      res.json(bus);
+    } catch (error) {
+      res.status(500).json({ error: "Error al actualizar bus" });
+    }
+  });
+
   app.post("/api/buses/bulk", async (req, res) => {
     try {
       const bulkSchema = z.object({
