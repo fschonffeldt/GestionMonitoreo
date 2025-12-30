@@ -65,11 +65,29 @@ export async function registerRoutes(
       if (!parsed.success) {
         return res.status(400).json({ error: parsed.error.errors });
       }
-      const incident = await storage.createIncident({
-        ...parsed.data,
-        status: "pending",
-      });
-      res.status(201).json(incident);
+      
+      const { cameraChannels, ...restData } = parsed.data;
+      const createdIncidents = [];
+      
+      if (restData.equipmentType === "camera" && cameraChannels && cameraChannels.length > 0) {
+        for (const channel of cameraChannels) {
+          const incident = await storage.createIncident({
+            ...restData,
+            cameraChannel: channel,
+            status: "pending",
+          });
+          createdIncidents.push(incident);
+        }
+      } else {
+        const incident = await storage.createIncident({
+          ...restData,
+          cameraChannel: undefined,
+          status: "pending",
+        });
+        createdIncidents.push(incident);
+      }
+      
+      res.status(201).json(createdIncidents.length === 1 ? createdIncidents[0] : createdIncidents);
     } catch (error) {
       res.status(500).json({ error: "Error al crear incidencia" });
     }

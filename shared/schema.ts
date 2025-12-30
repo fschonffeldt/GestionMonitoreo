@@ -99,7 +99,7 @@ export const incidentFormSchema = z.object({
   busId: z.string().min(1, "Seleccione un bus"),
   equipmentType: z.enum(["camera", "dvr", "gps", "hard_drive", "cable"]),
   incidentType: z.enum(["misaligned", "loose_cable", "faulty", "replacement"]),
-  cameraChannel: z.string().optional(),
+  cameraChannels: z.array(z.string()).optional(),
   description: z.string().optional(),
   reporter: z.string().optional(),
 });

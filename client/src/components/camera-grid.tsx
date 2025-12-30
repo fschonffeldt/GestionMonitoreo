@@ -1,6 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Camera, Video, Users, ArrowRight } from "lucide-react";
 import { CameraChannelLabels } from "@shared/schema";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface CameraStatus {
   channel: string;
@@ -17,6 +22,12 @@ const cameraIcons: Record<string, React.ElementType> = {
   ch2: Camera,
   ch3: Video,
   ch4: Users,
+};
+
+const statusLabels: Record<string, string> = {
+  operational: "Operativa - Funcionando correctamente",
+  misaligned: "Desalineada - Requiere ajuste de posición",
+  faulty: "Dañada - Requiere reparación o reemplazo",
 };
 
 export function CameraGrid({ busNumber, cameras }: CameraGridProps) {
@@ -61,9 +72,16 @@ export function CameraGrid({ busNumber, cameras }: CameraGridProps) {
                 className={`flex items-center gap-3 p-3 rounded-md border ${getStatusBgColor(camera.status)}`}
                 data-testid={`camera-status-${busNumber}-${camera.channel}`}
               >
-                <div className="flex items-center justify-center h-8 w-8 rounded-md bg-background">
-                  <Icon className="h-4 w-4 text-muted-foreground" />
-                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center justify-center h-8 w-8 rounded-md bg-background cursor-help">
+                      <Icon className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{CameraChannelLabels[camera.channel]}</p>
+                  </TooltipContent>
+                </Tooltip>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">
                     {camera.channel.toUpperCase()}
@@ -72,7 +90,14 @@ export function CameraGrid({ busNumber, cameras }: CameraGridProps) {
                     {CameraChannelLabels[camera.channel]}
                   </p>
                 </div>
-                <div className={`h-3 w-3 rounded-full ${getStatusColor(camera.status)}`} />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className={`h-3 w-3 rounded-full cursor-help ${getStatusColor(camera.status)}`} />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{statusLabels[camera.status]}</p>
+                  </TooltipContent>
+                </Tooltip>
               </div>
             );
           })}

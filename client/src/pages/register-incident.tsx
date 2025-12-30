@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Form,
   FormControl,
@@ -73,7 +74,7 @@ export default function RegisterIncident() {
       busId: "",
       equipmentType: "camera",
       incidentType: "faulty",
-      cameraChannel: "",
+      cameraChannels: [],
       description: "",
       reporter: "",
     },
@@ -83,12 +84,17 @@ export default function RegisterIncident() {
 
   const createIncident = useMutation({
     mutationFn: async (data: IncidentFormData) => {
-      return apiRequest("POST", "/api/incidents", data);
+      const response = await apiRequest("POST", "/api/incidents", data);
+      const result = await response.json();
+      return result;
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      const count = Array.isArray(result) ? result.length : 1;
       toast({
-        title: "Incidencia registrada",
-        description: "La incidencia se ha registrado correctamente.",
+        title: count > 1 ? "Incidencias registradas" : "Incidencia registrada",
+        description: count > 1 
+          ? `Se han registrado ${count} incidencias correctamente.`
+          : "La incidencia se ha registrado correctamente.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
@@ -129,7 +135,7 @@ export default function RegisterIncident() {
 
   const onSubmit = (data: IncidentFormData) => {
     if (data.equipmentType !== "camera") {
-      data.cameraChannel = undefined;
+      data.cameraChannels = undefined;
     }
     createIncident.mutate(data);
   };
@@ -255,24 +261,43 @@ export default function RegisterIncident() {
               {selectedEquipmentType === "camera" && (
                 <FormField
                   control={form.control}
-                  name="cameraChannel"
-                  render={({ field }) => (
+                  name="cameraChannels"
+                  render={() => (
                     <FormItem>
-                      <FormLabel>Canal de Cámara</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-camera-channel">
-                            <SelectValue placeholder="Seleccione el canal" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {cameraChannels.map((channel) => (
-                            <SelectItem key={channel.value} value={channel.value}>
-                              {channel.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <FormLabel>Canales de Cámara</FormLabel>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        Seleccione una o más cámaras afectadas
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        {cameraChannels.map((channel) => (
+                          <FormField
+                            key={channel.value}
+                            control={form.control}
+                            name="cameraChannels"
+                            render={({ field }) => (
+                              <FormItem className="flex items-center space-x-3 space-y-0 p-3 border rounded-md">
+                                <FormControl>
+                                  <Checkbox
+                                    checked={field.value?.includes(channel.value)}
+                                    onCheckedChange={(checked) => {
+                                      const currentValue = field.value || [];
+                                      if (checked) {
+                                        field.onChange([...currentValue, channel.value]);
+                                      } else {
+                                        field.onChange(currentValue.filter((v) => v !== channel.value));
+                                      }
+                                    }}
+                                    data-testid={`checkbox-camera-${channel.value}`}
+                                  />
+                                </FormControl>
+                                <FormLabel className="font-normal cursor-pointer">
+                                  {channel.label}
+                                </FormLabel>
+                              </FormItem>
+                            )}
+                          />
+                        ))}
+                      </div>
                       <FormMessage />
                     </FormItem>
                   )}
