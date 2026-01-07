@@ -1,14 +1,165 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertBusSchema, incidentFormSchema } from "@shared/schema";
+import { insertBusSchema, incidentFormSchema, loginSchema, createUserSchema } from "@shared/schema";
 import { z } from "zod";
 import { parseISO, startOfWeek } from "date-fns";
+
+declare module "express-session" {
+  interface SessionData {
+    userId?: string;
+  }
+}
+
+interface AuthRequest extends Request {
+  session: Request["session"] & { userId?: string };
+}
+
+const requireAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.session?.userId) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+  next();
+};
+
+const requireAdmin = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.session?.userId) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+  const user = await storage.getUser(req.session.userId);
+  if (!user || user.role !== "admin") {
+    return res.status(403).json({ error: "Acceso denegado" });
+  }
+  next();
+};
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  app.post("/api/auth/login", async (req: AuthRequest, res) => {
+    try {
+      const parsed = loginSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors });
+      }
+
+      const user = await storage.getUserByUsername(parsed.data.username);
+      if (!user || user.password !== parsed.data.password) {
+        return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
+      }
+
+      if (user.active !== "true") {
+        return res.status(401).json({ error: "Cuenta desactivada" });
+      }
+
+      req.session.userId = user.id;
+      const { password, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      res.status(500).json({ error: "Error al iniciar sesión" });
+    }
+  });
+
+  app.post("/api/auth/logout", (req: AuthRequest, res) => {
+    req.session.destroy((err: Error | null) => {
+      if (err) {
+        return res.status(500).json({ error: "Error al cerrar sesión" });
+      }
+      res.json({ message: "Sesión cerrada" });
+    });
+  });
+
+  app.get("/api/auth/me", async (req: AuthRequest, res) => {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+    const user = await storage.getUser(req.session.userId);
+    if (!user) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+    const { password, ...userWithoutPassword } = user;
+    res.json(userWithoutPassword);
+  });
+
+  app.get("/api/users", requireAdmin, async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      const usersWithoutPasswords = users.map(({ password, ...rest }) => rest);
+      res.json(usersWithoutPasswords);
+    } catch (error) {
+      res.status(500).json({ error: "Error al obtener usuarios" });
+    }
+  });
+
+  app.post("/api/users", requireAdmin, async (req, res) => {
+    try {
+      const parsed = createUserSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors });
+      }
+
+      const existing = await storage.getUserByUsername(parsed.data.username);
+      if (existing) {
+        return res.status(400).json({ error: "El usuario ya existe" });
+      }
+
+      const user = await storage.createUser({
+        ...parsed.data,
+        active: "true",
+      });
+      const { password, ...userWithoutPassword } = user;
+      res.status(201).json(userWithoutPassword);
+    } catch (error) {
+      res.status(500).json({ error: "Error al crear usuario" });
+    }
+  });
+
+  app.patch("/api/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updateSchema = z.object({
+        name: z.string().optional(),
+        role: z.enum(["admin", "technician"]).optional(),
+        active: z.enum(["true", "false"]).optional(),
+        password: z.string().min(4).optional(),
+      });
+
+      const parsed = updateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors });
+      }
+
+      const user = await storage.updateUser(id, parsed.data);
+      if (!user) {
+        return res.status(404).json({ error: "Usuario no encontrado" });
+      }
+
+      const { password, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      res.status(500).json({ error: "Error al actualizar usuario" });
+    }
+  });
+
+  app.delete("/api/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      if (req.session.userId === id) {
+        return res.status(400).json({ error: "No puede eliminar su propia cuenta" });
+      }
+
+      const deleted = await storage.deleteUser(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Usuario no encontrado" });
+      }
+      res.json({ message: "Usuario eliminado" });
+    } catch (error) {
+      res.status(500).json({ error: "Error al eliminar usuario" });
+    }
+  });
 
   app.get("/api/buses", async (req, res) => {
     try {

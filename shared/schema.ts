@@ -3,19 +3,38 @@ import { pgTable, text, varchar, timestamp, integer } from "drizzle-orm/pg-core"
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+export const UserRole = {
+  ADMIN: "admin",
+  TECHNICIAN: "technician",
+} as const;
+
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  name: text("name").notNull(),
+  role: text("role").notNull().default("technician"),
+  active: text("active").notNull().default("true"),
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+export const insertUserSchema = createInsertSchema(users).omit({ id: true });
+
+export const loginSchema = z.object({
+  username: z.string().min(1, "Usuario requerido"),
+  password: z.string().min(1, "Contraseña requerida"),
+});
+
+export const createUserSchema = z.object({
+  username: z.string().min(3, "Usuario debe tener al menos 3 caracteres"),
+  password: z.string().min(4, "Contraseña debe tener al menos 4 caracteres"),
+  name: z.string().min(1, "Nombre requerido"),
+  role: z.enum(["admin", "technician"]),
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+export type LoginData = z.infer<typeof loginSchema>;
+export type CreateUserData = z.infer<typeof createUserSchema>;
 
 export const EquipmentType = {
   CAMERA: "camera",

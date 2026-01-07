@@ -7,6 +7,7 @@ import {
   Calendar,
   CalendarDays,
   Bus,
+  Users,
 } from "lucide-react";
 import {
   Sidebar,
@@ -20,6 +21,7 @@ import {
   SidebarMenuItem,
   SidebarFooter,
 } from "@/components/ui/sidebar";
+import { useAuth } from "@/lib/auth";
 
 const menuItems = [
   {
@@ -59,6 +61,7 @@ const reportItems = [
 
 export function AppSidebar() {
   const [location] = useLocation();
+  const { isAdmin } = useAuth();
 
   return (
     <Sidebar>
@@ -69,7 +72,7 @@ export function AppSidebar() {
           </div>
           <div>
             <h1 className="text-lg font-semibold">FlotaControl</h1>
-            <p className="text-xs text-muted-foreground">Gestión de Incidencias</p>
+            <p className="text-xs text-muted-foreground">Gestion de Incidencias</p>
           </div>
         </div>
       </SidebarHeader>
@@ -116,6 +119,27 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {isAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Administracion</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={location === "/users"}
+                    data-testid="link-users"
+                  >
+                    <Link href="/users">
+                      <Users className="h-4 w-4" />
+                      <span>Usuarios</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter className="p-4">
         <p className="text-xs text-muted-foreground text-center">
