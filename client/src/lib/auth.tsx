@@ -28,6 +28,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryKey: ["/api/auth/me"],
     retry: false,
     staleTime: Infinity,
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        if (!res.ok) {
+          if (res.status === 401) {
+            return null;
+          }
+          throw new Error("Auth check failed");
+        }
+        return res.json();
+      } catch {
+        return null;
+      }
+    },
   });
 
   const loginMutation = useMutation({

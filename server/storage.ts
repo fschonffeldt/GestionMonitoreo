@@ -13,6 +13,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, getWeek, parseISO, isWithinInterval, format } from "date-fns";
+import bcrypt from "bcryptjs";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -56,12 +57,13 @@ export class MemStorage implements IStorage {
     this.seedData();
   }
 
-  private seedData() {
+  private async seedData() {
     const adminId = randomUUID();
+    const hashedPassword = await bcrypt.hash("admin123", 10);
     this.users.set(adminId, {
       id: adminId,
       username: "admin",
-      password: "admin123",
+      password: hashedPassword,
       name: "Administrador",
       role: "admin",
       active: "true",
@@ -146,10 +148,11 @@ export class MemStorage implements IStorage {
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
+    const hashedPassword = await bcrypt.hash(insertUser.password, 10);
     const user: User = { 
       id,
       username: insertUser.username,
-      password: insertUser.password,
+      password: hashedPassword,
       name: insertUser.name,
       role: insertUser.role || "technician",
       active: insertUser.active || "true",
@@ -161,7 +164,13 @@ export class MemStorage implements IStorage {
   async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
     const user = this.users.get(id);
     if (!user) return undefined;
-    const updatedUser = { ...user, ...updates, id };
+    
+    let processedUpdates = { ...updates };
+    if (updates.password) {
+      processedUpdates.password = await bcrypt.hash(updates.password, 10);
+    }
+    
+    const updatedUser = { ...user, ...processedUpdates, id };
     this.users.set(id, updatedUser);
     return updatedUser;
   }

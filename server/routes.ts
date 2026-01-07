@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { insertBusSchema, incidentFormSchema, loginSchema, createUserSchema } from "@shared/schema";
 import { z } from "zod";
 import { parseISO, startOfWeek } from "date-fns";
+import bcrypt from "bcryptjs";
 
 declare module "express-session" {
   interface SessionData {
@@ -46,8 +47,13 @@ export async function registerRoutes(
       }
 
       const user = await storage.getUserByUsername(parsed.data.username);
-      if (!user || user.password !== parsed.data.password) {
-        return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
+      if (!user) {
+        return res.status(401).json({ error: "Usuario o contrasena incorrectos" });
+      }
+      
+      const passwordMatch = await bcrypt.compare(parsed.data.password, user.password);
+      if (!passwordMatch) {
+        return res.status(401).json({ error: "Usuario o contrasena incorrectos" });
       }
 
       if (user.active !== "true") {
