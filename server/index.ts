@@ -16,15 +16,26 @@ declare module "http" {
 
 const MemoryStoreSession = MemoryStore(session);
 
+const cookieSecure = (process.env.SESSION_COOKIE_SECURE || "")
+  .trim()
+  .toLowerCase() === "true";
+
+console.log("ENV CHECK:", {
+  NODE_ENV: process.env.NODE_ENV,
+  SESSION_COOKIE_SECURE: process.env.SESSION_COOKIE_SECURE,
+  cookieSecure,
+});
+
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "flota-control-secret-key",
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === "production",
+      secure: cookieSecure,
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000,
+      sameSite: cookieSecure ? "none" : "lax",
     },
     store: new MemoryStoreSession({
       checkPeriod: 86400000,
@@ -80,6 +91,11 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Initialize storage before registering routes
+  const { storage } = await import("./storage");
+  await storage.initialize();
+  console.log("✅ Storage initialized successfully");
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -109,7 +125,7 @@ app.use((req, res, next) => {
     {
       port,
       host: "0.0.0.0",
-      reusePort: true,
+      reusePort: false,
     },
     () => {
       log(`serving on port ${port}`);

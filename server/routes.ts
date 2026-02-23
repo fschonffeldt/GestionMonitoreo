@@ -6,6 +6,8 @@ import { z } from "zod";
 import { parseISO, startOfWeek } from "date-fns";
 import bcrypt from "bcryptjs";
 
+console.log("SERVER INDEX LOADED ✅");
+
 declare module "express-session" {
   interface SessionData {
     userId?: string;
@@ -41,29 +43,39 @@ export async function registerRoutes(
 
   app.post("/api/auth/login", async (req: AuthRequest, res) => {
     try {
+      console.log("🔐 Login attempt for user:", req.body.username);
+
       const parsed = loginSchema.safeParse(req.body);
       if (!parsed.success) {
+        console.log("❌ Invalid login data:", parsed.error.errors);
         return res.status(400).json({ error: parsed.error.errors });
       }
 
       const user = await storage.getUserByUsername(parsed.data.username);
       if (!user) {
-        return res.status(401).json({ error: "Usuario o contrasena incorrectos" });
-      }
-      
-      const passwordMatch = await bcrypt.compare(parsed.data.password, user.password);
-      if (!passwordMatch) {
+        console.log("❌ User not found:", parsed.data.username);
         return res.status(401).json({ error: "Usuario o contrasena incorrectos" });
       }
 
+      console.log("✅ User found:", user.username, "- Checking password...");
+      const passwordMatch = await bcrypt.compare(parsed.data.password, user.password);
+      if (!passwordMatch) {
+        console.log("❌ Password mismatch for user:", user.username);
+        return res.status(401).json({ error: "Usuario o contrasena incorrectos" });
+      }
+
+      console.log("✅ Password correct - Checking active status:", user.active);
       if (user.active !== "true") {
+        console.log("❌ Account inactive for user:", user.username);
         return res.status(401).json({ error: "Cuenta desactivada" });
       }
 
       req.session.userId = user.id;
       const { password, ...userWithoutPassword } = user;
+      console.log("✅ Login successful for user:", user.username, "- Role:", user.role);
       res.json(userWithoutPassword);
     } catch (error) {
+      console.error("❌ Login error:", error);
       res.status(500).json({ error: "Error al iniciar sesión" });
     }
   });
@@ -78,14 +90,27 @@ export async function registerRoutes(
   });
 
   app.get("/api/auth/me", async (req: AuthRequest, res) => {
+    // 🔍 LOGS DE DEPURACIÓN
+    console.log("=== /api/auth/me ===");
+    console.log("Cookie header:", req.headers.cookie);
+    console.log("Session object:", req.session);
+    console.log("Session userId:", req.session?.userId);
+
     if (!req.session?.userId) {
+      console.log("❌ No hay userId en sesión");
       return res.status(401).json({ error: "No autorizado" });
     }
+
     const user = await storage.getUser(req.session.userId);
+
     if (!user) {
+      console.log("❌ Usuario no encontrado en DB");
       return res.status(401).json({ error: "No autorizado" });
     }
+
     const { password, ...userWithoutPassword } = user;
+
+    console.log("✅ Usuario autenticado:", userWithoutPassword.username);
     res.json(userWithoutPassword);
   });
 
@@ -152,7 +177,7 @@ export async function registerRoutes(
   app.delete("/api/users/:id", requireAdmin, async (req, res) => {
     try {
       const { id } = req.params;
-      
+
       if (req.session.userId === id) {
         return res.status(400).json({ error: "No puede eliminar su propia cuenta" });
       }
@@ -195,17 +220,17 @@ export async function registerRoutes(
       const updateSchema = z.object({
         plate: z.string(),
       });
-      
+
       const parsed = updateSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ error: parsed.error.errors });
       }
-      
+
       const bus = await storage.updateBus(id, parsed.data);
       if (!bus) {
         return res.status(404).json({ error: "Bus no encontrado" });
       }
-      
+
       res.json(bus);
     } catch (error) {
       res.status(500).json({ error: "Error al actualizar bus" });
@@ -228,7 +253,7 @@ export async function registerRoutes(
 
       const existingBuses = await storage.getBuses();
       const existingNumbers = new Set(existingBuses.map(b => b.busNumber));
-      
+
       const created: Array<{ busNumber: string; plate: string | null }> = [];
       const errors: Array<{ busNumber: string; error: string }> = [];
 
@@ -289,10 +314,10 @@ export async function registerRoutes(
       if (!parsed.success) {
         return res.status(400).json({ error: parsed.error.errors });
       }
-      
+
       const { cameraChannels, ...restData } = parsed.data;
       const createdIncidents = [];
-      
+
       if (restData.equipmentType === "camera" && cameraChannels && cameraChannels.length > 0) {
         for (const channel of cameraChannels) {
           const incident = await storage.createIncident({
@@ -310,7 +335,7 @@ export async function registerRoutes(
         });
         createdIncidents.push(incident);
       }
-      
+
       res.status(201).json(createdIncidents.length === 1 ? createdIncidents[0] : createdIncidents);
     } catch (error) {
       res.status(500).json({ error: "Error al crear incidencia" });
@@ -323,12 +348,12 @@ export async function registerRoutes(
         status: z.enum(["pending", "in_progress", "resolved"]).optional(),
         resolutionNotes: z.string().optional(),
       });
-      
+
       const parsed = updateSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ error: parsed.error.errors });
       }
-      
+
       const incident = await storage.updateIncident(req.params.id, parsed.data);
       if (!incident) {
         return res.status(404).json({ error: "Incidencia no encontrada" });
@@ -371,7 +396,7 @@ export async function registerRoutes(
     try {
       const { week } = req.query;
       let weekStart: Date;
-      
+
       if (week && typeof week === "string") {
         const [year, weekNum] = week.split("-W");
         const date = new Date(parseInt(year), 0, 1);
@@ -380,7 +405,7 @@ export async function registerRoutes(
       } else {
         weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
       }
-      
+
       const report = await storage.getWeeklyReport(weekStart);
       res.json(report);
     } catch (error) {
@@ -392,14 +417,14 @@ export async function registerRoutes(
     try {
       const { month } = req.query;
       let monthStart: Date;
-      
+
       if (month && typeof month === "string") {
         monthStart = parseISO(`${month}-01`);
       } else {
         monthStart = new Date();
         monthStart.setDate(1);
       }
-      
+
       const report = await storage.getMonthlyReport(monthStart);
       res.json(report);
     } catch (error) {
