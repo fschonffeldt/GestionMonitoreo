@@ -8,6 +8,7 @@ import {
   CalendarDays,
   Bus,
   Users,
+  FolderOpen,
 } from "lucide-react";
 import {
   Sidebar,
@@ -43,6 +44,11 @@ const menuItems = [
     title: "Seguimiento de Equipos",
     url: "/equipment",
     icon: ClipboardList,
+  },
+  {
+    title: "Gestión de Buses",
+    url: "/buses",
+    icon: FolderOpen,
   },
 ];
 

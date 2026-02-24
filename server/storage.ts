@@ -3,6 +3,8 @@ import {
   type InsertUser,
   type Bus,
   type InsertBus,
+  type BusDocument,
+  type InsertBusDocument,
   type Incident,
   type InsertIncident,
   type EquipmentStatus,
@@ -12,6 +14,7 @@ import {
   type MonthlyReport,
   users,
   buses,
+  busDocuments,
   incidents,
   equipmentStatus
 } from "@shared/schema";
@@ -32,6 +35,12 @@ export interface IStorage {
   getBus(id: string): Promise<Bus | undefined>;
   createBus(bus: InsertBus): Promise<Bus>;
   updateBus(id: string, updates: Partial<Bus>): Promise<Bus | undefined>;
+  deleteBus(id: string): Promise<boolean>;
+
+  getBusDocuments(busId: string): Promise<BusDocument[]>;
+  createBusDocument(doc: InsertBusDocument): Promise<BusDocument>;
+  deleteBusDocument(docId: string): Promise<BusDocument | undefined>;
+  getExpiringDocuments(): Promise<Array<{ busNumber: string; docType: string; fileName: string; expiresAt: Date; daysLeft: number }>>;
 
   getIncidents(filters?: { status?: string; equipmentType?: string; busId?: string; limit?: number }): Promise<Incident[]>;
   getIncident(id: string): Promise<Incident | undefined>;
@@ -60,10 +69,34 @@ export class DatabaseStorage implements IStorage {
       return;
     }
 
-    console.log("🔍 Checking for Galaxias user...");
-
     try {
+      // Ensure bus_documents table exists
+      try {
+        await db.execute(sql`SELECT 1 FROM bus_documents LIMIT 0`);
+        console.log("✅ bus_documents table exists.");
+      } catch {
+        console.warn("⚠️ bus_documents table not found. Creating it now...");
+        try {
+          await db.execute(sql`
+            CREATE TABLE IF NOT EXISTS bus_documents (
+              id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+              bus_id VARCHAR NOT NULL,
+              doc_type TEXT NOT NULL,
+              file_name TEXT NOT NULL,
+              file_path TEXT NOT NULL,
+              uploaded_at TIMESTAMP DEFAULT NOW(),
+              notes TEXT
+            )
+          `);
+          console.log("✅ bus_documents table created successfully.");
+        } catch (createErr) {
+          console.error("❌ Failed to create bus_documents table:", createErr);
+        }
+      }
+
       // Ensure Galaxias user exists
+      console.log("🔍 Checking for Galaxias user...");
+
       const [existing] = await db.select().from(users).where(eq(users.username, "Galaxias"));
       if (!existing) {
         console.log("📝 Seeding Galaxias user...");
@@ -170,26 +203,91 @@ export class DatabaseStorage implements IStorage {
     return updatedBus;
   }
 
-  async getIncidents(filters?: { status?: string; equipmentType?: string; busId?: string; limit?: number }): Promise<Incident[]> {
-    let query = db.select().from(incidents).orderBy(desc(incidents.reportedAt));
+  async deleteBus(id: string): Promise<boolean> {
+    // Delete cascade: documents, equipment_status, incidents
+    try {
+      await db.delete(busDocuments).where(eq(busDocuments.busId, id));
+    } catch (err) {
+      console.warn("⚠️ Could not delete bus_documents (table may not exist):", err);
+    }
+    await db.delete(equipmentStatus).where(eq(equipmentStatus.busId, id));
+    await db.delete(incidents).where(eq(incidents.busId, id));
+    const [deleted] = await db.delete(buses).where(eq(buses.id, id)).returning();
+    return !!deleted;
+  }
 
+  async getBusDocuments(busId: string): Promise<BusDocument[]> {
+    return db.select().from(busDocuments)
+      .where(eq(busDocuments.busId, busId))
+      .orderBy(busDocuments.uploadedAt);
+  }
+
+  async createBusDocument(doc: InsertBusDocument): Promise<BusDocument> {
+    const [result] = await db.insert(busDocuments).values({
+      ...doc,
+      uploadedAt: new Date(),
+      expiresAt: doc.expiresAt ? new Date(doc.expiresAt) : null,
+    }).returning();
+    return result;
+  }
+
+  async getExpiringDocuments(): Promise<Array<{ busNumber: string; docType: string; fileName: string; expiresAt: Date; daysLeft: number }>> {
+    const allDocs = await db.select().from(busDocuments).where(
+      sql`${busDocuments.expiresAt} IS NOT NULL`
+    );
+    const allBuses = await db.select().from(buses);
+    const busMap: Record<string, string> = {};
+    allBuses.forEach(b => busMap[b.id] = b.busNumber);
+
+    const now = new Date();
+    const results: Array<{ busNumber: string; docType: string; fileName: string; expiresAt: Date; daysLeft: number }> = [];
+
+    for (const doc of allDocs) {
+      if (!doc.expiresAt) continue;
+      const diffMs = doc.expiresAt.getTime() - now.getTime();
+      const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+      // revision_tecnica: alert 5 days before
+      // licencia_conducir, cedula_conductor: alert 30 days (1 month) before
+      let alertDays = 0;
+      if (doc.docType === "revision_tecnica") alertDays = 5;
+      else if (doc.docType === "licencia_conducir" || doc.docType === "cedula_conductor") alertDays = 30;
+      else continue; // no alert for other types
+
+      if (daysLeft <= alertDays) {
+        results.push({
+          busNumber: busMap[doc.busId] || doc.busId,
+          docType: doc.docType,
+          fileName: doc.fileName,
+          expiresAt: doc.expiresAt,
+          daysLeft,
+        });
+      }
+    }
+
+    return results.sort((a, b) => a.daysLeft - b.daysLeft);
+  }
+
+  async deleteBusDocument(docId: string): Promise<BusDocument | undefined> {
+    const [deleted] = await db.delete(busDocuments).where(eq(busDocuments.id, docId)).returning();
+    return deleted;
+  }
+
+  async getIncidents(filters?: { status?: string; equipmentType?: string; busId?: string; limit?: number }): Promise<Incident[]> {
     const conditions = [];
     if (filters?.status) conditions.push(eq(incidents.status, filters.status));
     if (filters?.equipmentType) conditions.push(eq(incidents.equipmentType, filters.equipmentType));
     if (filters?.busId) conditions.push(eq(incidents.busId, filters.busId));
 
-    let finalQuery = db.select().from(incidents);
-    if (conditions.length > 0) {
-      finalQuery = finalQuery.where(and(...conditions));
-    }
-
-    finalQuery = finalQuery.orderBy(desc(incidents.reportedAt));
+    const baseQuery = db.select().from(incidents);
+    const filteredQuery = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
+    const orderedQuery = filteredQuery.orderBy(desc(incidents.reportedAt));
 
     if (filters?.limit) {
-      finalQuery = finalQuery.limit(filters.limit);
+      return orderedQuery.limit(filters.limit);
     }
 
-    return finalQuery;
+    return orderedQuery;
   }
 
   async getIncident(id: string): Promise<Incident | undefined> {

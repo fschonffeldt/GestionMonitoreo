@@ -96,6 +96,24 @@ app.use((req, res, next) => {
   await storage.initialize();
   console.log("✅ Storage initialized successfully");
 
+  // Check for expiring documents on startup and every 24h
+  const { sendExpirationAlert } = await import("./email");
+  const checkExpiring = async () => {
+    try {
+      const expiring = await storage.getExpiringDocuments();
+      if (expiring.length > 0) {
+        console.log(`\n🔔 ${expiring.length} documento(s) por vencer o vencidos:`);
+        await sendExpirationAlert(expiring);
+      } else {
+        console.log("✅ No hay documentos por vencer.");
+      }
+    } catch (err) {
+      console.error("❌ Error verificando documentos por vencer:", err);
+    }
+  };
+  checkExpiring();
+  setInterval(checkExpiring, 24 * 60 * 60 * 1000); // every 24h
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

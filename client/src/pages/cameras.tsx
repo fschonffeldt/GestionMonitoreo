@@ -1,11 +1,21 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Camera, CheckCircle, AlertTriangle, XCircle, Search, Upload, FileSpreadsheet, Pencil } from "lucide-react";
+import { Camera, CheckCircle, AlertTriangle, XCircle, Search, Pencil, Trash2 } from "lucide-react";
 import { CameraChannelLabels } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Table,
   TableBody,
@@ -25,7 +35,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
@@ -38,7 +47,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import * as XLSX from "xlsx";
+
 
 interface CameraStatusData {
   busId: string;
@@ -65,41 +74,15 @@ export default function Cameras() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
-  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
-  const [uploadData, setUploadData] = useState<Array<{ busNumber: string; plate: string }>>([]);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [editingBus, setEditingBus] = useState<{ id: string; busNumber: string; plate: string } | null>(null);
   const [editPlate, setEditPlate] = useState("");
+  const [deletingBus, setDeletingBus] = useState<{ id: string; busNumber: string } | null>(null);
   const { toast } = useToast();
 
   const { data: cameraStatuses, isLoading } = useQuery<CameraStatusData[]>({
     queryKey: ["/api/camera-status"],
   });
 
-  const bulkUploadMutation = useMutation({
-    mutationFn: async (buses: Array<{ busNumber: string; plate: string }>) => {
-      const response = await apiRequest("POST", "/api/buses/bulk", { buses });
-      return response.json();
-    },
-    onSuccess: (result) => {
-      toast({
-        title: "Buses registrados",
-        description: `Se registraron ${result.created} buses correctamente.${result.errors?.length > 0 ? ` ${result.errors.length} errores.` : ""}`,
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/camera-status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/buses"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      setUploadDialogOpen(false);
-      setUploadData([]);
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "No se pudieron registrar los buses.",
-        variant: "destructive",
-      });
-    },
-  });
 
   const updatePlateMutation = useMutation({
     mutationFn: async ({ busId, plate }: { busId: string; plate: string }) => {
@@ -119,6 +102,30 @@ export default function Cameras() {
       toast({
         title: "Error",
         description: "No se pudo actualizar la placa.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteBusMutation = useMutation({
+    mutationFn: async (busId: string) => {
+      const response = await apiRequest("DELETE", `/api/buses/${busId}`);
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Bus eliminado",
+        description: "El bus y todos sus datos han sido eliminados.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/camera-status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/buses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      setDeletingBus(null);
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo eliminar el bus.",
         variant: "destructive",
       });
     },
@@ -153,18 +160,18 @@ export default function Cameras() {
 
   const filteredData = useMemo(() => {
     if (!cameraStatuses) return [];
-    
+
     return cameraStatuses.filter((bus) => {
       const matchesSearch = bus.busNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (bus.plate && bus.plate.toLowerCase().includes(searchTerm.toLowerCase()));
-      
+
       if (statusFilter === "all") return matchesSearch;
-      
+
       const hasStatusIssue = bus.cameras.some((cam) => {
         if (statusFilter === "issues") return cam.status !== "operational";
         return cam.status === statusFilter;
       });
-      
+
       return matchesSearch && hasStatusIssue;
     });
   }, [cameraStatuses, searchTerm, statusFilter]);
@@ -176,59 +183,11 @@ export default function Cameras() {
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setUploadError(null);
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
-
-        const buses: Array<{ busNumber: string; plate: string }> = [];
-        const errors: string[] = [];
-
-        jsonData.forEach((row, index) => {
-          const busNumber = String(row["N° distintivo"] || row["busNumber"] || row["numero"] || row["N°"] || "").trim();
-          const plate = String(row["Placa patente"] || row["plate"] || row["placa"] || row["patente"] || "").trim();
-
-          if (!busNumber) {
-            errors.push(`Fila ${index + 2}: Falta N° distintivo`);
-            return;
-          }
-
-          buses.push({ busNumber, plate });
-        });
-
-        if (errors.length > 0) {
-          setUploadError(`${errors.length} filas con errores:\n${errors.slice(0, 5).join("\n")}${errors.length > 5 ? `\n... y ${errors.length - 5} más` : ""}`);
-        }
-
-        setUploadData(buses);
-      } catch {
-        setUploadError("Error al leer el archivo. Asegúrese de que sea un archivo Excel válido.");
-      }
-    };
-
-    reader.readAsArrayBuffer(file);
-  };
-
-  const handleConfirmUpload = () => {
-    if (uploadData.length > 0) {
-      bulkUploadMutation.mutate(uploadData);
-    }
-  };
 
   const renderCameraCell = (busNumber: string, camera: { channel: string; status: string }) => (
     <Tooltip key={camera.channel}>
       <TooltipTrigger asChild>
-        <div 
+        <div
           className={`h-4 w-4 rounded-full cursor-help ${statusColors[camera.status] || "bg-gray-500"}`}
           data-testid={`camera-dot-${busNumber}-${camera.channel}`}
         />
@@ -247,89 +206,7 @@ export default function Cameras() {
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Estado de Cámaras</h1>
           <p className="text-muted-foreground">Vista general del estado de todas las cámaras de la flota</p>
         </div>
-        
-        <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-upload-excel">
-              <Upload className="h-4 w-4 mr-2" />
-              Cargar Excel
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Cargar Buses desde Excel</DialogTitle>
-              <DialogDescription>
-                Suba un archivo Excel con las columnas "N° distintivo" y "Placa patente" para registrar buses en masa.
-              </DialogDescription>
-            </DialogHeader>
-            
-            <div className="space-y-4">
-              <div className="border-2 border-dashed rounded-md p-6 text-center">
-                <FileSpreadsheet className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
-                <Input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleFileUpload}
-                  className="cursor-pointer"
-                  data-testid="input-excel-file"
-                />
-                <p className="text-xs text-muted-foreground mt-2">
-                  Formatos aceptados: .xlsx, .xls
-                </p>
-              </div>
 
-              {uploadError && (
-                <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
-                  {uploadError}
-                </div>
-              )}
-
-              {uploadData.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Vista previa ({uploadData.length} buses):</p>
-                  <div className="max-h-48 overflow-auto border rounded-md">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>N° Distintivo</TableHead>
-                          <TableHead>Placa</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {uploadData.slice(0, 10).map((bus, i) => (
-                          <TableRow key={i}>
-                            <TableCell>{bus.busNumber}</TableCell>
-                            <TableCell>{bus.plate || "-"}</TableCell>
-                          </TableRow>
-                        ))}
-                        {uploadData.length > 10 && (
-                          <TableRow>
-                            <TableCell colSpan={2} className="text-center text-muted-foreground">
-                              ... y {uploadData.length - 10} más
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setUploadDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button 
-                onClick={handleConfirmUpload} 
-                disabled={uploadData.length === 0 || bulkUploadMutation.isPending}
-                data-testid="button-confirm-upload"
-              >
-                {bulkUploadMutation.isPending ? "Cargando..." : `Registrar ${uploadData.length} buses`}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
@@ -434,7 +311,7 @@ export default function Cameras() {
                     <TableHead className="text-center">CH3</TableHead>
                     <TableHead className="text-center">CH4</TableHead>
                     <TableHead className="text-center">Estado</TableHead>
-                    <TableHead className="w-10"></TableHead>
+                    <TableHead className="w-20"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -463,14 +340,25 @@ export default function Cameras() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => handleEditPlate(bus)}
-                            data-testid={`button-edit-plate-${bus.busNumber}`}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => handleEditPlate(bus)}
+                              data-testid={`button-edit-plate-${bus.busNumber}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => setDeletingBus({ id: bus.busId, busNumber: bus.busNumber })}
+                              data-testid={`button-delete-bus-${bus.busNumber}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -524,6 +412,27 @@ export default function Cameras() {
           <span>Dañada</span>
         </div>
       </div>
+
+      <AlertDialog open={!!deletingBus} onOpenChange={(open) => !open && setDeletingBus(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar Bus {deletingBus?.busNumber}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará el bus y todos sus datos asociados (incidencias, estado de cámaras y documentos). Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deletingBus && deleteBusMutation.mutate(deletingBus.id)}
+              data-testid="button-confirm-delete-bus"
+            >
+              {deleteBusMutation.isPending ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={!!editingBus} onOpenChange={(open) => !open && setEditingBus(null)}>
         <DialogContent>

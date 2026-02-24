@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -77,6 +77,17 @@ export const buses = pgTable("buses", {
   plate: text("plate"),
 });
 
+export const busDocuments = pgTable("bus_documents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  busId: varchar("bus_id").notNull(),
+  docType: text("doc_type").notNull(),
+  fileName: text("file_name").notNull(),
+  filePath: text("file_path").notNull(),
+  uploadedAt: timestamp("uploaded_at").defaultNow(),
+  expiresAt: timestamp("expires_at"),
+  notes: text("notes"),
+});
+
 export const incidents = pgTable("incidents", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   busId: varchar("bus_id").notNull(),
@@ -104,9 +115,22 @@ export const equipmentStatus = pgTable("equipment_status", {
 export const insertBusSchema = createInsertSchema(buses).omit({ id: true });
 export const insertIncidentSchema = createInsertSchema(incidents).omit({ id: true, reportedAt: true, resolvedAt: true });
 export const insertEquipmentStatusSchema = createInsertSchema(equipmentStatus).omit({ id: true, updatedAt: true });
+export const insertBusDocumentSchema = createInsertSchema(busDocuments).omit({ id: true, uploadedAt: true });
 
 export type InsertBus = z.infer<typeof insertBusSchema>;
 export type Bus = typeof buses.$inferSelect;
+export type BusDocument = typeof busDocuments.$inferSelect;
+export type InsertBusDocument = z.infer<typeof insertBusDocumentSchema>;
+
+export const DOC_TYPES = {
+  permiso_circulacion: "Permiso de Circulación",
+  revision_tecnica: "Revisión Técnica",
+  chasis: "Chasis",
+  licencia_conducir: "Licencia de Conducir",
+  cedula_conductor: "Cédula de Conductor",
+} as const;
+
+export type DocTypeKey = keyof typeof DOC_TYPES;
 
 export type InsertIncident = z.infer<typeof insertIncidentSchema>;
 export type Incident = typeof incidents.$inferSelect;

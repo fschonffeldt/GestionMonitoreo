@@ -5,6 +5,9 @@ import { insertBusSchema, incidentFormSchema, loginSchema, createUserSchema } fr
 import { z } from "zod";
 import { parseISO, startOfWeek } from "date-fns";
 import bcrypt from "bcryptjs";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 
 console.log("SERVER INDEX LOADED ✅");
 
@@ -278,6 +281,137 @@ export async function registerRoutes(
       res.status(201).json({ created: created.length, errors });
     } catch (error) {
       res.status(500).json({ error: "Error al crear buses en masa" });
+    }
+  });
+
+  app.delete("/api/buses/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const deleted = await storage.deleteBus(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Bus no encontrado" });
+      }
+      res.json({ message: "Bus eliminado" });
+    } catch (error) {
+      console.error("❌ Error al eliminar bus:", error);
+      res.status(500).json({ error: "Error al eliminar bus" });
+    }
+  });
+
+  // ── Bus documents (multer upload) ──────────────────────────────────────────
+  const uploadsDir = path.join(process.cwd(), "uploads", "bus-docs");
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+
+  const fileStorage = multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      cb(null, `${unique}-${file.originalname}`);
+    },
+  });
+  const upload = multer({ storage: fileStorage, limits: { fileSize: 20 * 1024 * 1024 } });
+
+  app.get("/api/buses/:id/documents", async (req, res) => {
+    try {
+      const docs = await storage.getBusDocuments(req.params.id);
+      res.json(docs);
+    } catch (error) {
+      console.error("❌ Error al obtener documentos:", error);
+      res.status(500).json({ error: "Error al obtener documentos" });
+    }
+  });
+
+  app.post("/api/buses/:id/documents", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "Archivo requerido" });
+      const docSchema = z.object({
+        docType: z.string().min(1),
+        notes: z.string().optional(),
+        expiresAt: z.string().optional(),
+      });
+      const parsed = docSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.errors });
+
+      const doc = await storage.createBusDocument({
+        busId: req.params.id,
+        docType: parsed.data.docType,
+        fileName: req.file.originalname,
+        filePath: req.file.filename,
+        notes: parsed.data.notes || null,
+        expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
+      });
+      res.status(201).json(doc);
+    } catch (error) {
+      console.error("❌ Error al guardar documento:", error);
+      res.status(500).json({ error: "Error al guardar documento" });
+    }
+  });
+
+  app.delete("/api/buses/:busId/documents/:docId", async (req, res) => {
+    try {
+      const doc = await storage.deleteBusDocument(req.params.docId);
+      if (!doc) return res.status(404).json({ error: "Documento no encontrado" });
+      // Remove from disk
+      const filePath = path.join(uploadsDir, doc.filePath);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      res.json({ message: "Documento eliminado" });
+    } catch {
+      res.status(500).json({ error: "Error al eliminar documento" });
+    }
+  });
+
+  app.get("/api/buses/:busId/documents/:docId/download", async (req, res) => {
+    try {
+      const docs = await storage.getBusDocuments(req.params.busId);
+      const doc = docs.find(d => d.id === req.params.docId);
+      if (!doc) return res.status(404).json({ error: "Documento no encontrado" });
+      const filePath = path.join(uploadsDir, doc.filePath);
+      if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Archivo no encontrado" });
+      res.download(filePath, doc.fileName);
+    } catch {
+      res.status(500).json({ error: "Error al descargar documento" });
+    }
+  });
+
+  // Preview endpoint — serves file inline
+  app.get("/api/buses/:busId/documents/:docId/preview", async (req, res) => {
+    try {
+      const docs = await storage.getBusDocuments(req.params.busId);
+      const doc = docs.find(d => d.id === req.params.docId);
+      if (!doc) return res.status(404).json({ error: "Documento no encontrado" });
+      const filePath = path.join(uploadsDir, doc.filePath);
+      if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Archivo no encontrado" });
+
+      const ext = path.extname(doc.fileName).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".pdf": "application/pdf",
+        ".doc": "application/msword",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      };
+      const contentType = mimeTypes[ext] || "application/octet-stream";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", `inline; filename="${doc.fileName}"`);
+      const fileStream = fs.createReadStream(filePath);
+      fileStream.pipe(res);
+    } catch {
+      res.status(500).json({ error: "Error al previsualizar documento" });
+    }
+  });
+
+  // Expiring documents endpoint
+  app.get("/api/documents/expiring", async (req, res) => {
+    try {
+      const expiring = await storage.getExpiringDocuments();
+      res.json(expiring);
+    } catch (error) {
+      console.error("❌ Error al obtener documentos por vencer:", error);
+      res.status(500).json({ error: "Error al obtener documentos por vencer" });
     }
   });
 

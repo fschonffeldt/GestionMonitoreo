@@ -1,13 +1,47 @@
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bus, AlertTriangle, CheckCircle, Clock, Camera, HardDrive, Radio, Cable } from "lucide-react";
+import { Bus, AlertTriangle, CheckCircle, Clock, Camera, HardDrive, Radio, Cable, Search } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { IncidentList } from "@/components/incident-list";
-import { CameraGrid } from "@/components/camera-grid";
-import { MetricCardSkeleton, IncidentListSkeleton, CameraGridSkeleton } from "@/components/loading-skeleton";
+import { MetricCardSkeleton, IncidentListSkeleton } from "@/components/loading-skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Skeleton } from "@/components/ui/skeleton";
+import { CameraChannelLabels } from "@shared/schema";
 import type { DashboardStats, Incident, Bus as BusType } from "@shared/schema";
 
+const CAMERAS_PER_PAGE = 10;
+
+const camStatusColors: Record<string, string> = {
+  operational: "bg-green-500",
+  misaligned: "bg-amber-500",
+  faulty: "bg-red-500",
+};
+const camStatusLabels: Record<string, string> = {
+  operational: "Operativa",
+  misaligned: "Desalineada",
+  faulty: "Dañada",
+};
+
 export default function Dashboard() {
+  const [camSearch, setCamSearch] = useState("");
+  const [camPage, setCamPage] = useState(1);
+
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard"],
   });
@@ -25,6 +59,20 @@ export default function Dashboard() {
   });
 
   const busMap = new Map(buses?.map((b) => [b.id, b.busNumber]) || []);
+
+  const filteredCameras = useMemo(() => {
+    if (!cameraStatuses) return [];
+    if (!camSearch.trim()) return cameraStatuses;
+    return cameraStatuses.filter((b) =>
+      b.busNumber.toLowerCase().includes(camSearch.toLowerCase())
+    );
+  }, [cameraStatuses, camSearch]);
+
+  const camTotalPages = Math.ceil(filteredCameras.length / CAMERAS_PER_PAGE);
+  const pagedCameras = filteredCameras.slice(
+    (camPage - 1) * CAMERAS_PER_PAGE,
+    camPage * CAMERAS_PER_PAGE
+  );
 
   return (
     <div className="p-6 space-y-6">
@@ -144,31 +192,114 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div>
-        <h2 className="text-lg font-semibold mb-4">Estado de Cámaras por Bus</h2>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle className="text-lg">Estado de Cámaras por Bus</CardTitle>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar N° bus..."
+                value={camSearch}
+                onChange={(e) => { setCamSearch(e.target.value); setCamPage(1); }}
+                className="pl-8 w-[160px] h-8 text-sm"
+                data-testid="input-cam-search"
+              />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
           {!cameraStatuses ? (
-            <>
-              <CameraGridSkeleton />
-              <CameraGridSkeleton />
-              <CameraGridSkeleton />
-              <CameraGridSkeleton />
-            </>
-          ) : cameraStatuses.length === 0 ? (
-            <div className="col-span-full text-center py-8 text-muted-foreground">
-              No hay buses registrados
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : filteredCameras.length === 0 ? (
+            <div className="text-center py-6 text-muted-foreground text-sm">
+              No se encontraron buses
             </div>
           ) : (
-            cameraStatuses.map((bus) => (
-              <CameraGrid
-                key={bus.busId}
-                busNumber={bus.busNumber}
-                cameras={bus.cameras as Array<{ channel: string; status: "operational" | "misaligned" | "faulty" }>}
-              />
-            ))
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-20">N° Bus</TableHead>
+                    <TableHead className="text-center w-12">CH1</TableHead>
+                    <TableHead className="text-center w-12">CH2</TableHead>
+                    <TableHead className="text-center w-12">CH3</TableHead>
+                    <TableHead className="text-center w-12">CH4</TableHead>
+                    <TableHead className="text-center">Estado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pagedCameras.map((bus) => {
+                    const issues = bus.cameras.filter((c) => c.status !== "operational").length;
+                    return (
+                      <TableRow key={bus.busId}>
+                        <TableCell className="font-medium">{bus.busNumber}</TableCell>
+                        {bus.cameras.map((cam) => (
+                          <TableCell key={cam.channel} className="text-center">
+                            <div className="flex justify-center">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className={`h-3.5 w-3.5 rounded-full cursor-help ${camStatusColors[cam.status] || "bg-gray-500"}`} />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="font-medium">{CameraChannelLabels[cam.channel]}</p>
+                                  <p className="text-xs text-muted-foreground">{camStatusLabels[cam.status]}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </TableCell>
+                        ))}
+                        <TableCell className="text-center">
+                          {issues === 0 ? (
+                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800 text-xs">
+                              OK
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800 text-xs">
+                              {issues} problema{issues > 1 ? "s" : ""}
+                            </Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              {camTotalPages > 1 && (
+                <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                  <p className="text-xs text-muted-foreground">
+                    {((camPage - 1) * CAMERAS_PER_PAGE) + 1}–{Math.min(camPage * CAMERAS_PER_PAGE, filteredCameras.length)} de {filteredCameras.length}
+                  </p>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setCamPage((p) => Math.max(1, p - 1))}
+                      disabled={camPage === 1}
+                    >
+                      Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setCamPage((p) => Math.min(camTotalPages, p + 1))}
+                      disabled={camPage === camTotalPages}
+                    >
+                      Siguiente
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

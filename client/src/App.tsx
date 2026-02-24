@@ -19,11 +19,12 @@ import WeeklyReport from "@/pages/weekly-report";
 import MonthlyReport from "@/pages/monthly-report";
 import Login from "@/pages/login";
 import Users from "@/pages/users";
+import Buses from "@/pages/buses";
 import NotFound from "@/pages/not-found";
 
 function Router() {
   const { isAdmin } = useAuth();
-  
+
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
@@ -32,6 +33,7 @@ function Router() {
       <Route path="/equipment" component={Equipment} />
       <Route path="/reports/weekly" component={WeeklyReport} />
       <Route path="/reports/monthly" component={MonthlyReport} />
+      <Route path="/buses" component={Buses} />
       {isAdmin && <Route path="/users" component={Users} />}
       <Route component={NotFound} />
     </Switch>
@@ -41,7 +43,7 @@ function Router() {
 function AuthenticatedApp() {
   const { user, logout, isLoading } = useAuth();
   const [, setLocation] = useLocation();
-  
+
   const style = {
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3rem",
