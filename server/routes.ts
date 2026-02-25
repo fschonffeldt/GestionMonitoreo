@@ -330,6 +330,7 @@ export async function registerRoutes(
         docType: z.string().min(1),
         notes: z.string().optional(),
         expiresAt: z.string().optional(),
+        driverId: z.string().optional(),
       });
       const parsed = docSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.errors });
@@ -341,6 +342,7 @@ export async function registerRoutes(
         filePath: req.file.filename,
         notes: parsed.data.notes || null,
         expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
+        driverId: parsed.data.driverId || null,
       });
       res.status(201).json(doc);
     } catch (error) {
@@ -412,6 +414,162 @@ export async function registerRoutes(
     } catch (error) {
       console.error("❌ Error al obtener documentos por vencer:", error);
       res.status(500).json({ error: "Error al obtener documentos por vencer" });
+    }
+  });
+
+  // ── Drivers ───────────────────────────────────────────────────────────
+
+  app.get("/api/drivers", async (_req, res) => {
+    try {
+      const allDrivers = await storage.getDrivers();
+      res.json(allDrivers);
+    } catch (error) {
+      console.error("❌ Error al obtener conductores:", error);
+      res.status(500).json({ error: "Error al obtener conductores" });
+    }
+  });
+
+  app.get("/api/drivers/search", async (req, res) => {
+    try {
+      const query = (req.query.q as string) || "";
+      const results = await storage.searchDrivers(query);
+      res.json(results);
+    } catch (error) {
+      console.error("❌ Error al buscar conductores:", error);
+      res.status(500).json({ error: "Error al buscar conductores" });
+    }
+  });
+
+  app.post("/api/drivers", async (req, res) => {
+    try {
+      const schema = z.object({
+        name: z.string().min(1),
+        rut: z.string().min(1),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.errors });
+      const driver = await storage.createDriver(parsed.data);
+      res.status(201).json(driver);
+    } catch (error: any) {
+      if (error?.code === "23505") {
+        return res.status(409).json({ error: "Ya existe un conductor con ese RUT" });
+      }
+      console.error("❌ Error al crear conductor:", error);
+      res.status(500).json({ error: "Error al crear conductor" });
+    }
+  });
+
+  app.get("/api/buses/:id/drivers", async (req, res) => {
+    try {
+      const busDriversList = await storage.getBusDrivers(req.params.id);
+      res.json(busDriversList);
+    } catch (error) {
+      console.error("❌ Error al obtener conductores del bus:", error);
+      res.status(500).json({ error: "Error al obtener conductores" });
+    }
+  });
+
+  app.post("/api/buses/:id/drivers", async (req, res) => {
+    try {
+      const schema = z.object({
+        driverId: z.string().min(1),
+        role: z.string().default("titular"),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.errors });
+      const result = await storage.assignDriverToBus(req.params.id, parsed.data.driverId, parsed.data.role);
+      res.status(201).json(result);
+    } catch (error) {
+      console.error("❌ Error al asignar conductor:", error);
+      res.status(500).json({ error: "Error al asignar conductor" });
+    }
+  });
+
+  app.delete("/api/buses/:busId/drivers/:driverId", async (req, res) => {
+    try {
+      const ok = await storage.removeDriverFromBus(req.params.busId, req.params.driverId);
+      if (!ok) return res.status(404).json({ error: "Asignación no encontrada" });
+      res.json({ message: "Conductor desasignado" });
+    } catch (error) {
+      console.error("❌ Error al desasignar conductor:", error);
+      res.status(500).json({ error: "Error al desasignar conductor" });
+    }
+  });
+
+  // ── Email Recipients ─────────────────────────────────────────────────
+
+  app.get("/api/email-recipients", async (_req, res) => {
+    try {
+      const recipients = await storage.getEmailRecipients();
+      res.json(recipients);
+    } catch (error) {
+      console.error("❌ Error al obtener destinatarios:", error);
+      res.status(500).json({ error: "Error al obtener destinatarios" });
+    }
+  });
+
+  app.post("/api/email-recipients", async (req, res) => {
+    try {
+      const schema = z.object({
+        email: z.string().email(),
+        name: z.string().min(1),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.errors });
+      const recipient = await storage.createEmailRecipient(parsed.data.email, parsed.data.name);
+      res.status(201).json(recipient);
+    } catch (error: any) {
+      if (error?.code === "23505") {
+        return res.status(409).json({ error: "Ese correo ya está registrado" });
+      }
+      console.error("❌ Error al crear destinatario:", error);
+      res.status(500).json({ error: "Error al crear destinatario" });
+    }
+  });
+
+  app.delete("/api/email-recipients/:id", async (req, res) => {
+    try {
+      const ok = await storage.deleteEmailRecipient(req.params.id);
+      if (!ok) return res.status(404).json({ error: "Destinatario no encontrado" });
+      res.json({ message: "Destinatario eliminado" });
+    } catch (error) {
+      console.error("❌ Error al eliminar destinatario:", error);
+      res.status(500).json({ error: "Error al eliminar destinatario" });
+    }
+  });
+
+  app.patch("/api/email-recipients/:id/toggle", async (req, res) => {
+    try {
+      const updated = await storage.toggleEmailRecipient(req.params.id);
+      if (!updated) return res.status(404).json({ error: "Destinatario no encontrado" });
+      res.json(updated);
+    } catch (error) {
+      console.error("❌ Error al actualizar destinatario:", error);
+      res.status(500).json({ error: "Error al actualizar destinatario" });
+    }
+  });
+
+  app.post("/api/email-test", async (_req, res) => {
+    try {
+      const expiring = await storage.getExpiringDocuments();
+      const recipients = await storage.getEmailRecipients();
+      const activeEmails = recipients.filter(r => r.active === "true").map(r => r.email);
+      if (activeEmails.length === 0) {
+        return res.status(400).json({ error: "No hay destinatarios activos" });
+      }
+      if (expiring.length === 0) {
+        return res.json({ message: "No hay documentos por vencer actualmente" });
+      }
+      const { sendExpirationAlert } = await import("./email");
+      const sent = await sendExpirationAlert(expiring, activeEmails);
+      if (sent) {
+        res.json({ message: `Email enviado a ${activeEmails.join(", ")}` });
+      } else {
+        res.status(500).json({ error: "No se pudo enviar el email. Verifica la configuración SMTP." });
+      }
+    } catch (error) {
+      console.error("❌ Error al enviar email de prueba:", error);
+      res.status(500).json({ error: "Error al enviar email de prueba" });
     }
   });
 

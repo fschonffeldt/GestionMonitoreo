@@ -9,6 +9,7 @@ import {
   Bus,
   Users,
   FolderOpen,
+  Settings,
 } from "lucide-react";
 import {
   Sidebar,
@@ -139,6 +140,18 @@ export function AppSidebar() {
                     <Link href="/users">
                       <Users className="h-4 w-4" />
                       <span>Usuarios</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={location === "/settings"}
+                    data-testid="link-settings"
+                  >
+                    <Link href="/settings">
+                      <Settings className="h-4 w-4" />
+                      <span>Configuración</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

@@ -80,6 +80,7 @@ export default function RegisterIncident() {
   const [newBusDialogOpen, setNewBusDialogOpen] = useState(false);
   const [newBusNumber, setNewBusNumber] = useState("");
   const [newBusPlate, setNewBusPlate] = useState("");
+  const [busSearchTerm, setBusSearchTerm] = useState("");
 
   // Excel import state
   const [excelPreview, setExcelPreview] = useState<BusPreviewRow[]>([]);
@@ -342,11 +343,27 @@ export default function RegisterIncident() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {buses?.map((bus) => (
-                            <SelectItem key={bus.id} value={bus.id}>
-                              Bus {bus.busNumber} {bus.plate && `(${bus.plate})`}
-                            </SelectItem>
-                          ))}
+                          <div className="px-2 py-2 sticky top-0 bg-popover z-10 border-b">
+                            <Input
+                              placeholder="Buscar por N° o placa..."
+                              value={busSearchTerm}
+                              onChange={(e) => setBusSearchTerm(e.target.value)}
+                              className="h-8 text-sm"
+                              onKeyDown={(e) => e.stopPropagation()}
+                            />
+                          </div>
+                          {buses
+                            ?.filter((bus) => {
+                              if (!busSearchTerm) return true;
+                              const q = busSearchTerm.toLowerCase();
+                              return bus.busNumber.toLowerCase().includes(q) ||
+                                (bus.plate && bus.plate.toLowerCase().includes(q));
+                            })
+                            .map((bus) => (
+                              <SelectItem key={bus.id} value={bus.id}>
+                                Bus {bus.busNumber} {bus.plate && `(${bus.plate})`}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
 
@@ -428,8 +445,8 @@ export default function RegisterIncident() {
                                 {!excelFileName ? (
                                   <div
                                     className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${isDragging
-                                        ? "border-primary bg-primary/5"
-                                        : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30"
+                                      ? "border-primary bg-primary/5"
+                                      : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30"
                                       }`}
                                     onClick={() => fileInputRef.current?.click()}
                                     onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}

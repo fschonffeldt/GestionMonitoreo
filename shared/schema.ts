@@ -80,12 +80,28 @@ export const buses = pgTable("buses", {
 export const busDocuments = pgTable("bus_documents", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   busId: varchar("bus_id").notNull(),
+  driverId: varchar("driver_id"),
   docType: text("doc_type").notNull(),
   fileName: text("file_name").notNull(),
   filePath: text("file_path").notNull(),
   uploadedAt: timestamp("uploaded_at").defaultNow(),
   expiresAt: timestamp("expires_at"),
   notes: text("notes"),
+});
+
+export const drivers = pgTable("drivers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  rut: text("rut").notNull().unique(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const busDrivers = pgTable("bus_drivers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  busId: varchar("bus_id").notNull(),
+  driverId: varchar("driver_id").notNull(),
+  role: text("role").notNull().default("titular"),
+  assignedAt: timestamp("assigned_at").defaultNow(),
 });
 
 export const incidents = pgTable("incidents", {
@@ -112,15 +128,32 @@ export const equipmentStatus = pgTable("equipment_status", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const emailRecipients = pgTable("email_recipients", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull(),
+  active: text("active").notNull().default("true"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertBusSchema = createInsertSchema(buses).omit({ id: true });
 export const insertIncidentSchema = createInsertSchema(incidents).omit({ id: true, reportedAt: true, resolvedAt: true });
 export const insertEquipmentStatusSchema = createInsertSchema(equipmentStatus).omit({ id: true, updatedAt: true });
 export const insertBusDocumentSchema = createInsertSchema(busDocuments).omit({ id: true, uploadedAt: true });
+export const insertDriverSchema = createInsertSchema(drivers).omit({ id: true, createdAt: true });
+export const insertBusDriverSchema = createInsertSchema(busDrivers).omit({ id: true, assignedAt: true });
+export const insertEmailRecipientSchema = createInsertSchema(emailRecipients).omit({ id: true, createdAt: true });
 
 export type InsertBus = z.infer<typeof insertBusSchema>;
 export type Bus = typeof buses.$inferSelect;
 export type BusDocument = typeof busDocuments.$inferSelect;
 export type InsertBusDocument = z.infer<typeof insertBusDocumentSchema>;
+export type Driver = typeof drivers.$inferSelect;
+export type InsertDriver = z.infer<typeof insertDriverSchema>;
+export type BusDriver = typeof busDrivers.$inferSelect;
+export type InsertBusDriver = z.infer<typeof insertBusDriverSchema>;
+export type EmailRecipient = typeof emailRecipients.$inferSelect;
+export type InsertEmailRecipient = z.infer<typeof insertEmailRecipientSchema>;
 
 export const DOC_TYPES = {
   permiso_circulacion: "Permiso de Circulación",

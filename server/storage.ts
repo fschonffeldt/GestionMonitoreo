@@ -5,6 +5,10 @@ import {
   type InsertBus,
   type BusDocument,
   type InsertBusDocument,
+  type Driver,
+  type InsertDriver,
+  type BusDriver,
+  type EmailRecipient,
   type Incident,
   type InsertIncident,
   type EquipmentStatus,
@@ -15,6 +19,9 @@ import {
   users,
   buses,
   busDocuments,
+  drivers,
+  busDrivers,
+  emailRecipients,
   incidents,
   equipmentStatus
 } from "@shared/schema";
@@ -40,7 +47,20 @@ export interface IStorage {
   getBusDocuments(busId: string): Promise<BusDocument[]>;
   createBusDocument(doc: InsertBusDocument): Promise<BusDocument>;
   deleteBusDocument(docId: string): Promise<BusDocument | undefined>;
-  getExpiringDocuments(): Promise<Array<{ busNumber: string; docType: string; fileName: string; expiresAt: Date; daysLeft: number }>>;
+  getExpiringDocuments(): Promise<Array<{ busNumber: string; docType: string; fileName: string; expiresAt: Date; daysLeft: number; driverName?: string }>>;
+
+  getDrivers(): Promise<Driver[]>;
+  searchDrivers(query: string): Promise<Driver[]>;
+  createDriver(driver: InsertDriver): Promise<Driver>;
+  deleteDriver(id: string): Promise<boolean>;
+  getBusDrivers(busId: string): Promise<Array<BusDriver & { driver: Driver }>>;
+  assignDriverToBus(busId: string, driverId: string, role: string): Promise<BusDriver>;
+  removeDriverFromBus(busId: string, driverId: string): Promise<boolean>;
+
+  getEmailRecipients(): Promise<EmailRecipient[]>;
+  createEmailRecipient(email: string, name: string): Promise<EmailRecipient>;
+  deleteEmailRecipient(id: string): Promise<boolean>;
+  toggleEmailRecipient(id: string): Promise<EmailRecipient | undefined>;
 
   getIncidents(filters?: { status?: string; equipmentType?: string; busId?: string; limit?: number }): Promise<Incident[]>;
   getIncident(id: string): Promise<Incident | undefined>;
@@ -165,7 +185,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getBuses(): Promise<Bus[]> {
-    return db.select().from(buses).orderBy(buses.busNumber);
+    return db.select().from(buses).orderBy(sql`
+      CASE WHEN ${buses.busNumber} ~ '^[0-9]+$'
+        THEN CAST(${buses.busNumber} AS INTEGER)
+        ELSE 999999
+      END, ${buses.busNumber}
+    `);
   }
 
   async getBus(id: string): Promise<Bus | undefined> {
@@ -231,7 +256,7 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async getExpiringDocuments(): Promise<Array<{ busNumber: string; docType: string; fileName: string; expiresAt: Date; daysLeft: number }>> {
+  async getExpiringDocuments(): Promise<Array<{ busNumber: string; docType: string; fileName: string; expiresAt: Date; daysLeft: number; driverName?: string }>> {
     const allDocs = await db.select().from(busDocuments).where(
       sql`${busDocuments.expiresAt} IS NOT NULL`
     );
@@ -239,8 +264,13 @@ export class DatabaseStorage implements IStorage {
     const busMap: Record<string, string> = {};
     allBuses.forEach(b => busMap[b.id] = b.busNumber);
 
+    // Fetch all drivers for name lookup
+    const allDrivers = await db.select().from(drivers);
+    const driverMap: Record<string, string> = {};
+    allDrivers.forEach(d => driverMap[d.id] = d.name);
+
     const now = new Date();
-    const results: Array<{ busNumber: string; docType: string; fileName: string; expiresAt: Date; daysLeft: number }> = [];
+    const results: Array<{ busNumber: string; docType: string; fileName: string; expiresAt: Date; daysLeft: number; driverName?: string }> = [];
 
     for (const doc of allDocs) {
       if (!doc.expiresAt) continue;
@@ -261,6 +291,7 @@ export class DatabaseStorage implements IStorage {
           fileName: doc.fileName,
           expiresAt: doc.expiresAt,
           daysLeft,
+          driverName: doc.driverId ? driverMap[doc.driverId] : undefined,
         });
       }
     }
@@ -271,6 +302,100 @@ export class DatabaseStorage implements IStorage {
   async deleteBusDocument(docId: string): Promise<BusDocument | undefined> {
     const [deleted] = await db.delete(busDocuments).where(eq(busDocuments.id, docId)).returning();
     return deleted;
+  }
+
+  // ── Drivers ──────────────────────────────────────────────────────────────
+
+  async getDrivers(): Promise<Driver[]> {
+    return db.select().from(drivers).orderBy(drivers.name);
+  }
+
+  async searchDrivers(query: string): Promise<Driver[]> {
+    const q = `%${query.toLowerCase()}%`;
+    return db.select().from(drivers).where(
+      sql`LOWER(${drivers.name}) LIKE ${q} OR LOWER(${drivers.rut}) LIKE ${q}`
+    );
+  }
+
+  async createDriver(driver: InsertDriver): Promise<Driver> {
+    const [result] = await db.insert(drivers).values(driver).returning();
+    return result;
+  }
+
+  async deleteDriver(id: string): Promise<boolean> {
+    // Remove all bus associations first
+    await db.delete(busDrivers).where(eq(busDrivers.driverId, id));
+    // Remove driver documents
+    await db.delete(busDocuments).where(eq(busDocuments.driverId, id));
+    const [deleted] = await db.delete(drivers).where(eq(drivers.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getBusDrivers(busId: string): Promise<Array<BusDriver & { driver: Driver }>> {
+    const associations = await db.select().from(busDrivers).where(eq(busDrivers.busId, busId));
+    const results: Array<BusDriver & { driver: Driver }> = [];
+    for (const assoc of associations) {
+      const [driver] = await db.select().from(drivers).where(eq(drivers.id, assoc.driverId));
+      if (driver) {
+        results.push({ ...assoc, driver });
+      }
+    }
+    return results;
+  }
+
+  async assignDriverToBus(busId: string, driverId: string, role: string): Promise<BusDriver> {
+    // Check if already assigned
+    const existing = await db.select().from(busDrivers).where(
+      and(eq(busDrivers.busId, busId), eq(busDrivers.driverId, driverId))
+    );
+    if (existing.length > 0) {
+      // Update role
+      const [updated] = await db.update(busDrivers)
+        .set({ role })
+        .where(and(eq(busDrivers.busId, busId), eq(busDrivers.driverId, driverId)))
+        .returning();
+      return updated;
+    }
+    const [result] = await db.insert(busDrivers).values({ busId, driverId, role }).returning();
+    return result;
+  }
+
+  async removeDriverFromBus(busId: string, driverId: string): Promise<boolean> {
+    // Also remove driver docs linked to this bus
+    await db.delete(busDocuments).where(
+      and(eq(busDocuments.busId, busId), eq(busDocuments.driverId, driverId))
+    );
+    const [deleted] = await db.delete(busDrivers).where(
+      and(eq(busDrivers.busId, busId), eq(busDrivers.driverId, driverId))
+    ).returning();
+    return !!deleted;
+  }
+
+  // ── Email Recipients ────────────────────────────────────────────────────
+
+  async getEmailRecipients(): Promise<EmailRecipient[]> {
+    return db.select().from(emailRecipients).orderBy(emailRecipients.name);
+  }
+
+  async createEmailRecipient(email: string, name: string): Promise<EmailRecipient> {
+    const [result] = await db.insert(emailRecipients).values({ email, name }).returning();
+    return result;
+  }
+
+  async deleteEmailRecipient(id: string): Promise<boolean> {
+    const [deleted] = await db.delete(emailRecipients).where(eq(emailRecipients.id, id)).returning();
+    return !!deleted;
+  }
+
+  async toggleEmailRecipient(id: string): Promise<EmailRecipient | undefined> {
+    const [current] = await db.select().from(emailRecipients).where(eq(emailRecipients.id, id));
+    if (!current) return undefined;
+    const newActive = current.active === "true" ? "false" : "true";
+    const [updated] = await db.update(emailRecipients)
+      .set({ active: newActive })
+      .where(eq(emailRecipients.id, id))
+      .returning();
+    return updated;
   }
 
   async getIncidents(filters?: { status?: string; equipmentType?: string; busId?: string; limit?: number }): Promise<Incident[]> {

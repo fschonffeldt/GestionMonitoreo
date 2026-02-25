@@ -103,7 +103,9 @@ app.use((req, res, next) => {
       const expiring = await storage.getExpiringDocuments();
       if (expiring.length > 0) {
         console.log(`\n🔔 ${expiring.length} documento(s) por vencer o vencidos:`);
-        await sendExpirationAlert(expiring);
+        const recipients = await storage.getEmailRecipients();
+        const activeEmails = recipients.filter(r => r.active === "true").map(r => r.email);
+        await sendExpirationAlert(expiring, activeEmails);
       } else {
         console.log("✅ No hay documentos por vencer.");
       }

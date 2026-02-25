@@ -20,6 +20,7 @@ import MonthlyReport from "@/pages/monthly-report";
 import Login from "@/pages/login";
 import Users from "@/pages/users";
 import Buses from "@/pages/buses";
+import SettingsPage from "@/pages/settings";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -35,6 +36,7 @@ function Router() {
       <Route path="/reports/monthly" component={MonthlyReport} />
       <Route path="/buses" component={Buses} />
       {isAdmin && <Route path="/users" component={Users} />}
+      {isAdmin && <Route path="/settings" component={SettingsPage} />}
       <Route component={NotFound} />
     </Switch>
   );
