@@ -1,6 +1,24 @@
-node_modules
-dist
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables
+.env
+
+# Uploaded files
+uploads/
+
+# Replit files
+.replit
+replit.md
+.local/
+
+# OS files
 .DS_Store
-server/public
-vite.config.ts.*
-*.tar.gz
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
